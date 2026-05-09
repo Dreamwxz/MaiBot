@@ -246,6 +246,9 @@ class StatisticOutputTask(AsyncTask):
 
     SEP_LINE = "-" * 84
 
+    # 跟踪后台任务以防止内存泄漏
+    _background_tasks: set[asyncio.Task] = set()
+
     def __init__(self, record_file_path: str | None = None):
         # 延迟300秒启动，运行间隔300秒
         super().__init__(task_name="Statistics Data Output Task", wait_before_start=0, run_interval=300)
@@ -382,7 +385,9 @@ class StatisticOutputTask(AsyncTask):
                 logger.exception(f"后台统计数据输出过程中发生异常：{e}")
 
         # 创建后台任务，立即返回
-        asyncio.create_task(_async_collect_and_output())
+        task = asyncio.create_task(_async_collect_and_output())
+        StatisticOutputTask._background_tasks.add(task)
+        task.add_done_callback(StatisticOutputTask._background_tasks.discard)
 
     # -- 以下为统计数据收集方法 --
 
@@ -464,6 +469,9 @@ class StatisticOutputTask(AsyncTask):
     def _append_defaultdict_list(stats_period: StatPeriodData, key: str, subkey: str, value: float) -> None:
         counter = cast(defaultdict[str, list[float]], stats_period[key])
         counter[subkey].append(value)
+        # 限制每个子列表最大长度为1000，只保留最近1000条耗时记录，防止内存无限增长
+        if len(counter[subkey]) > 1000:
+            counter[subkey][:] = counter[subkey][-1000:]
 
     @staticmethod
     def _collect_model_request_for_period(collect_period: list[tuple[str, datetime]]) -> StatPeriodMapping:
@@ -819,6 +827,10 @@ class StatisticOutputTask(AsyncTask):
 
         self._refresh_all_time_duration_stats(stat["all_time"])
 
+        # 释放对旧快照数据的引用，使其可被 GC 回收，防止内存泄漏
+        if last_all_time_stat is not None:
+            last_all_time_stat.clear()
+
         # 更新上次完整统计数据的时间戳
         # 将所有defaultdict转换为普通dict以避免类型冲突
         clean_stat_data = self._convert_defaultdict_to_dict(stat["all_time"])
@@ -889,14 +901,20 @@ class StatisticOutputTask(AsyncTask):
                 avg_data[item_name] = round(avg_time_cost, 3)
                 std_data[item_name] = round(variance**0.5, 3)
 
-    @staticmethod
-    def _drop_cached_time_cost_lists(stat_data: object) -> None:
-        """不把原始耗时列表写入 local_store；需要时从数据库重新统计。"""
+    def _drop_cached_time_cost_lists(self, stat_data: object) -> None:
+        """不把原始耗时列表写入 local_store；需要时从数据库重新统计。
+        同时清理 name_mapping 中过旧的条目，防止其无限增长导致内存泄漏。"""
         if not isinstance(stat_data, dict):
             return
 
         for key in [TIME_COST_BY_TYPE, TIME_COST_BY_USER, TIME_COST_BY_MODEL, TIME_COST_BY_MODULE]:
             stat_data.pop(key, None)
+
+        # name_mapping 超过 10000 条时，淘汰最早的 1000 条，防止内存无限增长
+        if len(self.name_mapping) > 10000:
+            oldest_keys = list(self.name_mapping.keys())[:1000]
+            for key in oldest_keys:
+                del self.name_mapping[key]
 
     def _convert_defaultdict_to_dict(self, data: object) -> object:
         # sourcery skip: dict-comprehension, extract-duplicate-method, inline-immediately-returned-variable, merge-duplicate-blocks
@@ -2448,6 +2466,9 @@ class StatisticOutputTask(AsyncTask):
 class AsyncStatisticOutputTask(AsyncTask):
     """完全异步的统计输出任务 - 更高性能版本"""
 
+    # 跟踪后台任务以防止内存泄漏
+    _background_tasks: set[asyncio.Task] = set()
+
     def __init__(self, record_file_path: str | None = None):
         # 延迟0秒启动，运行间隔300秒
         super().__init__(task_name="Async Statistics Data Output Task", wait_before_start=0, run_interval=300)
@@ -2492,4 +2513,6 @@ class AsyncStatisticOutputTask(AsyncTask):
                 logger.exception(f"后台统计数据输出过程中发生异常：{e}")
 
         # 创建后台任务，立即返回
-        asyncio.create_task(_async_collect_and_output())
+        task = asyncio.create_task(_async_collect_and_output())
+        AsyncStatisticOutputTask._background_tasks.add(task)
+        task.add_done_callback(AsyncStatisticOutputTask._background_tasks.discard)

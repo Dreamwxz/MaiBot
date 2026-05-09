@@ -49,6 +49,9 @@ engine = create_engine(
     echo=False,
     connect_args={"check_same_thread": False},
     pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=10,
+    pool_recycle=3600,
 )
 
 # 创建会话工厂（使用 sqlmodel.Session）
@@ -131,6 +134,7 @@ def get_db_session(auto_commit: bool = True) -> Generator[Session, None, None]:
         session.rollback()
         raise
     finally:
+        session.expunge_all()
         session.close()
 
 
@@ -164,4 +168,5 @@ def get_db() -> Generator[Session, None, None]:
     try:
         yield session
     finally:
+        session.expunge_all()
         session.close()

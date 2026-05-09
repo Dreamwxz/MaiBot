@@ -222,7 +222,7 @@ async def get_chat_list() -> ChatListResponse:
             )
 
         with get_db_session() as session:
-            for chat_session in session.exec(select(ChatSession)).all():
+            for chat_session in session.exec(select(ChatSession)).yield_per(100):
                 if chat_session.session_id in chat_by_id:
                     continue
                 chat_name = get_chat_name_from_latest_message(chat_session.session_id, session)
@@ -233,7 +233,7 @@ async def get_chat_list() -> ChatListResponse:
                     is_group=bool(chat_session.group_id),
                 )
 
-            expression_chat_ids = {chat_id for chat_id in session.exec(select(Expression.session_id)).all() if chat_id}
+            expression_chat_ids = {chat_id for chat_id in session.exec(select(Expression.session_id)).yield_per(100) if chat_id}
             for session_id in expression_chat_ids:
                 if session_id in chat_by_id:
                     continue
@@ -308,7 +308,7 @@ async def get_expression_list(
                 )
             if chat_id:
                 count_statement = count_statement.where(col(Expression.session_id) == chat_id)
-            total = len(session.exec(count_statement).all())
+            total = session.exec(select(func.count()).select_from(count_statement)).one()
             data = [expression_to_response(expr, session) for expr in expressions]
 
         return ExpressionListResponse(success=True, total=total, page=page, page_size=page_size, data=data)

@@ -84,6 +84,7 @@ CHUNK_STATUS = {
 }
 
 FILE_WARNING_KEEP_LIMIT = 50
+COMPLETED_TASK_KEEP_LIMIT = 50
 
 
 def _now() -> float:
@@ -981,8 +982,27 @@ class ImportTaskManager:
                 pending += 1
         return pending
 
+    def _cleanup_old_tasks(self) -> None:
+        active_statuses = {"queued", "preparing", "running", "cancel_requested"}
+        active_ids: set[str] = set()
+        inactive: list[tuple[float, str]] = []
+        for tid, task in self._tasks.items():
+            if task.status in active_statuses:
+                active_ids.add(tid)
+            else:
+                sort_key = task.finished_at or task.updated_at or task.created_at
+                inactive.append((sort_key, tid))
+        if len(inactive) <= COMPLETED_TASK_KEEP_LIMIT:
+            return
+        inactive.sort(key=lambda x: x[0], reverse=True)
+        remove_ids = {tid for _, tid in inactive[COMPLETED_TASK_KEEP_LIMIT:]}
+        for tid in remove_ids:
+            del self._tasks[tid]
+        self._task_order = deque(tid for tid in self._task_order if tid not in remove_ids)
+
     async def _ensure_worker(self) -> None:
         async with self._lock:
+            self._cleanup_old_tasks()
             if self._worker_task and not self._worker_task.done():
                 return
             self._stopping = False
@@ -1409,6 +1429,7 @@ class ImportTaskManager:
 
     async def list_tasks(self, limit: int = 50) -> List[Dict[str, Any]]:
         async with self._lock:
+            self._cleanup_old_tasks()
             task_ids = list(self._task_order)[: max(1, int(limit))]
             return [self._tasks[task_id].to_summary() for task_id in task_ids if task_id in self._tasks]
 

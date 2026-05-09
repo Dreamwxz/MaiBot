@@ -328,11 +328,16 @@ class ChatSummaryWritebackState:
 
 
 class ChatSummaryWritebackService:
+    # 超过 24 小时未更新的状态条目将被驱逐，下次访问时从 DB 恢复
+    _STATE_TTL_SECONDS: float = 24 * 60 * 60
+
     def __init__(self) -> None:
         self._queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=256)
         self._worker_task: Optional[asyncio.Task] = None
         self._stopping = False
         self._states: dict[str, ChatSummaryWritebackState] = {}
+        # 记录每个 session_id 对应状态的最后更新时间（epoch 秒）
+        self._states_last_updated: dict[str, float] = {}
 
     async def start(self) -> None:
         if self._worker_task is not None and not self._worker_task.done():
@@ -398,6 +403,22 @@ class ChatSummaryWritebackService:
                 last_trigger_time=time.time() if restored_count > 0 else 0.0,
             )
             self._states[session_id] = state
+            self._states_last_updated[session_id] = time.time()
+        else:
+            self._cleanup_expired_states(session_id)
+            # 驱逐后需要重新检查
+            state = self._states.get(session_id)
+            if state is None:
+                restored_count = await self._load_last_trigger_message_count(
+                    session_id=session_id,
+                    total_message_count=total_message_count,
+                )
+                state = ChatSummaryWritebackState(
+                    last_trigger_message_count=restored_count,
+                    last_trigger_time=time.time() if restored_count > 0 else 0.0,
+                )
+                self._states[session_id] = state
+                self._states_last_updated[session_id] = time.time()
         pending_message_count = max(0, total_message_count - state.last_trigger_message_count)
         if pending_message_count < threshold:
             return
@@ -429,11 +450,31 @@ class ChatSummaryWritebackService:
 
         state.last_trigger_message_count = total_message_count
         state.last_trigger_time = time.time()
+        self._states_last_updated[session_id] = time.time()
         logger.info(
             f"聊天摘要自动写回成功: session_id={session_id} trigger=message_threshold "
             f"total_messages={total_message_count} context_length={context_length} "
             f"detail={getattr(result, 'detail', '')}",
         )
+
+    def _cleanup_expired_states(self, current_session_id: str = "") -> None:
+        """驱逐超过 TTL 未更新的状态条目。如果指定 current_session_id，则仅检查该条目；否则扫描全部。"""
+        now = time.time()
+        if current_session_id:
+            last_updated = self._states_last_updated.get(current_session_id)
+            if last_updated is not None and (now - last_updated) > self._STATE_TTL_SECONDS:
+                self._states.pop(current_session_id, None)
+                self._states_last_updated.pop(current_session_id, None)
+            return
+
+        expired = [
+            sid
+            for sid, last_updated in self._states_last_updated.items()
+            if (now - last_updated) > self._STATE_TTL_SECONDS
+        ]
+        for sid in expired:
+            self._states.pop(sid, None)
+            self._states_last_updated.pop(sid, None)
 
     async def _load_last_trigger_message_count(self, *, session_id: str, total_message_count: int) -> int:
         """从已落库的聊天摘要恢复触发游标，避免服务重启后重复摘要。"""

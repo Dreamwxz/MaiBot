@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import case
-from sqlmodel import col, delete, select
+from sqlmodel import col, delete, func, select
 
 import json
 
@@ -344,14 +344,14 @@ async def get_person_stats() -> Dict[str, Any]:
     """
     try:
         with get_db_session() as session:
-            total = len(session.exec(select(PersonInfo.id)).all())
-            known = len(session.exec(select(PersonInfo.id).where(col(PersonInfo.is_known))).all())
+            total = session.exec(select(func.count(PersonInfo.id))).one()
+            known = session.exec(select(func.count(PersonInfo.id)).where(col(PersonInfo.is_known))).one()
         unknown = total - known
 
         # 按平台统计
         platforms = {}
         with get_db_session() as session:
-            for platform in session.exec(select(PersonInfo.platform)).all():
+            for platform in session.exec(select(func.distinct(PersonInfo.platform))).all():
                 if platform:
                     platforms[platform] = platforms.get(platform, 0) + 1
 

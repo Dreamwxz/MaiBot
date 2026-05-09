@@ -251,13 +251,11 @@ async def get_summary_statistics(start_time: datetime, end_time: datetime) -> St
                 col(OnlineTime.end_timestamp) >= start_time,
             )
         )
-        online_records = session.exec(statement).all()
-
-    for record in online_records:
-        start = max(record.start_timestamp, start_time)
-        end = min(record.end_timestamp, end_time)
-        if end > start:
-            summary.online_time += (end - start).total_seconds()
+        for record in session.exec(statement).yield_per(100):
+            start = max(record.start_timestamp, start_time)
+            end = min(record.end_timestamp, end_time)
+            if end > start:
+                summary.online_time += (end - start).total_seconds()
 
     summary.total_messages = count_messages(start_time=start_time.timestamp(), end_time=end_time.timestamp())
     summary.total_replies = count_messages(
@@ -432,15 +430,16 @@ def fetch_online_time_since(query_start_time: datetime) -> list[tuple[datetime, 
     """获取指定时间之后仍有覆盖的在线时间区间。"""
     with get_db_session(auto_commit=False) as session:
         statement = select(OnlineTime).where(col(OnlineTime.end_timestamp) >= query_start_time)
-        records = session.exec(statement).all()
-        return [(record.start_timestamp, record.end_timestamp) for record in records]
+        return [
+            (record.start_timestamp, record.end_timestamp)
+            for record in session.exec(statement).yield_per(100)
+        ]
 
 
 def fetch_model_usage_since(query_start_time: datetime) -> list[dict[str, object]]:
     """获取指定时间之后的 LLM 使用记录。"""
     with get_db_session(auto_commit=False) as session:
         statement = select(ModelUsage).where(col(ModelUsage.timestamp) >= query_start_time)
-        records = session.exec(statement).all()
         return [
             {
                 "timestamp": record.timestamp,
@@ -453,7 +452,7 @@ def fetch_model_usage_since(query_start_time: datetime) -> list[dict[str, object
                 "cost": record.cost,
                 "time_cost": record.time_cost,
             }
-            for record in records
+            for record in session.exec(statement).yield_per(100)
         ]
 
 
@@ -461,14 +460,14 @@ def fetch_messages_since(query_start_time: datetime) -> list[Messages]:
     """获取指定时间之后的消息记录。"""
     with get_db_session(auto_commit=False) as session:
         statement = select(Messages).where(col(Messages.timestamp) >= query_start_time)
-        return list(session.exec(statement).all())
+        return list(session.exec(statement).yield_per(100))
 
 
 def fetch_tool_records_since(query_start_time: datetime) -> list[ToolRecord]:
     """获取指定时间之后的工具调用记录。"""
     with get_db_session(auto_commit=False) as session:
         statement = select(ToolRecord).where(col(ToolRecord.timestamp) >= query_start_time)
-        return list(session.exec(statement).all())
+        return list(session.exec(statement).yield_per(100))
 
 
 def get_earliest_statistics_time(fallback_time: datetime) -> datetime:

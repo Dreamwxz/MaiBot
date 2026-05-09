@@ -1,3 +1,13 @@
+* text=auto
+
+*.py text eol=lf
+*.md text
+*.txt text
+*.json text
+*.yml text
+*.yaml text
+*.toml text
+*.sh text eol=lf
 *.bat text eol=crlf
 *.cmd text eol=crlf
 webui/dist/** binary
