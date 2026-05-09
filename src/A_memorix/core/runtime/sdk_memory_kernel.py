@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import gc
+import ctypes
 import json
 import pickle
 import time
@@ -35,6 +37,18 @@ from ..utils.summary_importer import SummaryImporter
 from ..utils.time_parser import format_timestamp, parse_query_datetime_to_timestamp
 from ..utils.web_import_manager import ImportTaskManager
 from .search_runtime_initializer import SearchRuntimeBundle, build_search_runtime
+
+_libc = None
+
+def _malloc_trim() -> None:
+    global _libc
+    if _libc is None:
+        try:
+            _libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        except OSError:
+            _libc = False
+    if _libc:
+        _libc.malloc_trim(0)
 
 logger = get_logger("A_Memorix.SDKMemoryKernel")
 
@@ -2170,6 +2184,8 @@ class SDKMemoryKernel:
             self.graph_store.save()
         if self.sparse_index is not None and getattr(self.sparse_index.config, "enabled", False):
             self.sparse_index.ensure_loaded()
+        gc.collect()
+        _malloc_trim()
 
     async def _start_background_tasks(self) -> None:
         async with self._background_lock:

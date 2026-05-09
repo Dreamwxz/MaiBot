@@ -5,6 +5,8 @@ from rich.traceback import install
 import asyncio
 import hashlib
 import os
+os.environ.setdefault("MALLOC_MMAP_THRESHOLD_", "65536")
+os.environ.setdefault("MALLOC_TRIM_THRESHOLD_", "65536")
 import platform
 # import shutil
 import subprocess

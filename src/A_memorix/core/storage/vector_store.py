@@ -5,6 +5,8 @@
 """
 
 import os
+import gc
+import ctypes
 import pickle
 import hashlib
 import shutil
