@@ -7,6 +7,7 @@ from typing import Any, List, Optional
 import asyncio
 import json
 import pickle
+import random
 import time
 
 from json_repair import repair_json
@@ -386,6 +387,10 @@ class ChatSummaryWritebackService:
         session_id = self._resolve_session_id(message)
         if not session_id:
             return
+
+        # 概率性触发全量清理，确保不活跃 session 的过期状态也能被驱逐
+        if random.random() < 0.01:
+            self._cleanup_expired_states()
 
         total_message_count = count_messages(session_id=session_id)
         if total_message_count <= 0:

@@ -348,12 +348,13 @@ async def get_person_stats() -> Dict[str, Any]:
             known = session.exec(select(func.count(PersonInfo.id)).where(col(PersonInfo.is_known))).one()
         unknown = total - known
 
-        # 按平台统计
+        # 按平台统计——使用 GROUP BY + COUNT 获取每个平台的实际数量
         platforms = {}
         with get_db_session() as session:
-            for platform in session.exec(select(func.distinct(PersonInfo.platform))).all():
+            stmt = select(PersonInfo.platform, func.count(PersonInfo.id)).group_by(PersonInfo.platform)
+            for platform, count in session.exec(stmt).all():
                 if platform:
-                    platforms[platform] = platforms.get(platform, 0) + 1
+                    platforms[platform] = count
 
         return {"success": True, "data": {"total": total, "known": known, "unknown": unknown, "platforms": platforms}}
 

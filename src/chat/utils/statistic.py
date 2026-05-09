@@ -246,9 +246,6 @@ class StatisticOutputTask(AsyncTask):
 
     SEP_LINE = "-" * 84
 
-    # 跟踪后台任务以防止内存泄漏
-    _background_tasks: set[asyncio.Task] = set()
-
     def __init__(self, record_file_path: str | None = None):
         # 延迟300秒启动，运行间隔300秒
         super().__init__(task_name="Statistics Data Output Task", wait_before_start=0, run_interval=300)
@@ -385,9 +382,7 @@ class StatisticOutputTask(AsyncTask):
                 logger.exception(f"后台统计数据输出过程中发生异常：{e}")
 
         # 创建后台任务，立即返回
-        task = asyncio.create_task(_async_collect_and_output())
-        StatisticOutputTask._background_tasks.add(task)
-        task.add_done_callback(StatisticOutputTask._background_tasks.discard)
+        asyncio.create_task(_async_collect_and_output())
 
     # -- 以下为统计数据收集方法 --
 
@@ -2466,9 +2461,6 @@ class StatisticOutputTask(AsyncTask):
 class AsyncStatisticOutputTask(AsyncTask):
     """完全异步的统计输出任务 - 更高性能版本"""
 
-    # 跟踪后台任务以防止内存泄漏
-    _background_tasks: set[asyncio.Task] = set()
-
     def __init__(self, record_file_path: str | None = None):
         # 延迟0秒启动，运行间隔300秒
         super().__init__(task_name="Async Statistics Data Output Task", wait_before_start=0, run_interval=300)
@@ -2513,6 +2505,4 @@ class AsyncStatisticOutputTask(AsyncTask):
                 logger.exception(f"后台统计数据输出过程中发生异常：{e}")
 
         # 创建后台任务，立即返回
-        task = asyncio.create_task(_async_collect_and_output())
-        AsyncStatisticOutputTask._background_tasks.add(task)
-        task.add_done_callback(AsyncStatisticOutputTask._background_tasks.discard)
+        asyncio.create_task(_async_collect_and_output())
